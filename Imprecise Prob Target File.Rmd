@@ -1,0 +1,140 @@
+---
+title: "Showing the Stochastically GT Condition (Simulation)"
+output: html_document
+---
+
+```{r setup, include = FALSE,echo=FALSE,message=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = NULL,tidy=TRUE,message=FALSE,echo=FALSE,results=FALSE)
+```
+
+
+```{r, eval = FALSE,echo=FALSE,message=FALSE}
+install.packages(c("biglm", "dplyr", "ggplot2", "readr", "targets", "tidyr"))
+```
+
+```{r,echo=FALSE,message=FALSE}
+require(targets)
+```
+
+
+```{r,echo=FALSE,message=FALSE}
+tar_unscript()
+```
+
+
+```{targets example-globals, tar_globals = TRUE,echo=FALSE,message=FALSE}
+options(tidyverse.quiet = TRUE)
+require(tidyverse)
+set.seed(7788)
+tar_option_set(packages = c("biglm", "dplyr", "ggplot2", "readr", "tidyr"))
+drawS <- function() { # returns a set S
+  tempU <- runif(n=1)
+  rhsVal <- abs(tempU - 0.5)
+  
+  
+  # set object is a vector
+  lowEnd <- 0.5 - rhsVal
+  uppEnd <- 0.5 + rhsVal
+  sSet <- c(lowEnd,uppEnd)
+  return(sSet)
+}
+
+## 10000 independent draws from P_S
+drawSTibble <- function() {
+  NSim <- 10000
+
+  # allocate a matrix for the simulation draws of S
+  sMatrix <- matrix(0,nrow=NSim,ncol=2)
+  for (i in 1:NSim) {
+    sMatrix[i,] <- drawS()
+  }  
+  
+  colnames(sMatrix) <- c("lowEnd","uppEnd")
+  sTibble <- as_tibble(sMatrix)
+  return(sTibble)
+}
+  
+
+# indicator function: =1 if u is in sSet
+incHelper <- function(u,lowEnd,uppEnd) {
+  res <- ifelse((u >= lowEnd) & (u <= uppEnd),1,0)
+  return(res)
+}
+
+# calculate the empirical probability that a given u is in S
+# sTibble should have two columns: lowEnd and uppEnd
+# good resources on tidyverse apply operations here:
+# https://dplyr.tidyverse.org/articles/rowwise.html
+fLittleU <- function(u,sTibble) {
+  empProb <- sTibble %>% rowwise() %>% 
+    summarise(inc = incHelper(u,lowEnd,uppEnd)) %>% 
+    as.matrix() %>% as.numeric() %>% mean()
+  return(empProb)
+}
+
+### create a ggplot comparison chart of the cdf of f(u) and Unif(0,1)
+require(ggplot2)
+require(ggthemes)
+buildPlotDF <- function() {
+  P_SDist <- drawSTibble()
+  
+  ## initialize and calculate f(u)
+  fuVec <- rep(0,times=1000)
+  uVals <- seq(from=0,to=1,length=1000)
+  for (i in 1:1000) {
+    tempU <- uVals[i]
+    fuVec[i] <- fLittleU(tempU,P_SDist)
+  }
+  
+  ## find the 1 - CDF of f(u)
+  fuSurvivalVec <- rep(0,times=1000)
+  for (i in 1:1000) {
+    tempU <- uVals[i]
+    fuSurvivalVec[i] <- mean(fuVec > tempU)
+  }
+  
+  plotDF <- tibble(uVal = uVals,fuSurvival = fuSurvivalVec)  
+}
+
+createCompChart <- function(plotDF) {
+
+  
+  compPlot <- ggplot(data=plotDF,aes(x=uVal,y=fuSurvival)) + geom_point()
+  compPlot <- compPlot + geom_abline(intercept=1,slope=-1,lty=2,col="red")
+  compPlot <- compPlot + theme_tufte() +
+    labs(x = "u",y="P(f(U) >= u)",title = "Survival Function of f(u) vs Uniform Survival Function\nFor P_S from the Binomial Example\nLiverpool Risk Institute Talk on Imprecise Probability\n(Ryan Martin)")
+  compPlot <- compPlot + theme(axis.text.x = element_text(size=12),
+                               axis.title.x = element_text(size=14),
+                               axis.text.y = element_text(size=12),
+                               axis.title.y = element_text(size=14),
+                               title = element_text(size=14))
+  return(compPlot)
+}
+```
+
+
+
+```{targets sTibble,echo=FALSE,message=FALSE}
+tar_target(sTibble,drawSTibble())
+```
+
+
+```{targets compGraph,echo=FALSE,message=FALSE}
+list(tar_target(compDF,buildPlotDF()),
+     tar_target(compGraph,createCompChart(compDF)))
+```
+
+```{r,echo=FALSE,message=FALSE,comment=FALSE}
+tar_make()
+```
+
+```{r,echo=FALSE,figure=TRUE}
+compGraph <- tar_read(compGraph)
+compGraph
+require(ggplot2)
+ggsave(compGraph,file = "Binomial Ex CDF Comparison.png",
+       width=12,height=8)
+```
+
+
+
